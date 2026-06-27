@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: apps/api — ruff + mypy + alembic + pytest
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: mixsight
+          POSTGRES_PASSWORD: mixsight
+          POSTGRES_DB: mixsight_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mixsight -d mixsight_dev"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://mixsight:mixsight@localhost:5432/mixsight_dev
+      ENVIRONMENT: development
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install Python deps
+        working-directory: apps/api
+        run: uv sync
+
+      - name: Ruff
+        working-directory: apps/api
+        run: uv run ruff check src tests
+
+      - name: Ruff format check
+        working-directory: apps/api
+        run: uv run ruff format --check src tests
+
+      - name: Mypy
+        working-directory: apps/api
+        run: uv run mypy src
+
+      - name: Alembic round-trip (up → down → up)
+        working-directory: apps/api
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+
+      - name: Pytest (tenancy harness + AuditLog hook + healthz)
+        working-directory: apps/api
+        run: uv run pytest -v
+
+  web:
+    name: apps/web — typecheck + lint + build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Write placeholder .env for Clerk build
+        # apps/web reads ../../.env via dotenv-cli. Placeholders satisfy the
+        # Clerk SDK's format check at build time; real keys live in the
+        # deployed environment (Phase 1c per ADR-004).
+        run: |
+          cat > .env << 'EOF'
+          DATABASE_URL=postgresql+asyncpg://placeholder/placeholder
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_cGxhY2Vob2xkZXIuY2xlcmsuYWNjb3VudHMuZGV2JA
+          CLERK_SECRET_KEY=sk_test_placeholder
+          CLERK_WEBHOOK_SECRET=whsec_placeholder
+          NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+          NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+          NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/
+          NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/
+          EOF
+
+      - name: Typecheck
+        run: pnpm --filter @mixsight/web typecheck
+
+      - name: Lint
+        run: pnpm --filter @mixsight/web lint
+
+      - name: Build
+        run: pnpm --filter @mixsight/web build

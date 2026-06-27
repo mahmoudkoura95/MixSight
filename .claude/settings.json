@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/tenancy-check.sh",
+            "description": "Flag new FastAPI routes that take client_id without enforce_client_access"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/migration-check.sh",
+            "description": "Verify any new Alembic migration follows §6.2 conventions"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/llm-fallback-check.sh",
+            "description": "Flag any new messages.create call without an explicit surface-specific fallback"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/audit-log-check.sh",
+            "description": "Flag patterns that may bypass the SQLAlchemy audit log hook"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/phase-reminder.sh",
+            "description": "Inject CURRENT_PHASE.md state into the conversation context"
+          }
+        ]
+      }
+    ]
+  }
+}

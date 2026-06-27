@@ -1,0 +1,1 @@
+"""MixSight FastAPI backend."""

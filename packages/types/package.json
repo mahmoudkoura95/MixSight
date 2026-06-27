@@ -1,0 +1,8 @@
+{
+  "name": "@mixsight/types",
+  "version": "0.0.1",
+  "private": true,
+  "description": "OpenAPI-generated TypeScript types for the MixSight API. Regenerate via `pnpm codegen`.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts"
+}

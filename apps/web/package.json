@@ -1,0 +1,31 @@
+{
+  "name": "@mixsight/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MixSight authenticated app. Phase 1a Week 1 scaffold.",
+  "scripts": {
+    "dev": "dotenv -e ../../.env -- next dev -p 3000",
+    "build": "dotenv -e ../../.env -- next build",
+    "start": "dotenv -e ../../.env -- next start -p 3000",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@clerk/elements": "^0.24.0",
+    "@clerk/nextjs": "^6.0.0",
+    "next": "16.2.6",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv-cli": "^9",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.6",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

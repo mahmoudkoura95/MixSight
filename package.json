@@ -1,0 +1,22 @@
+{
+  "name": "mixsight",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MixSight monorepo root. See SCOPE.md for product spec, CLAUDE.md for operating manual.",
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "db:up": "docker compose -f infra/docker/docker-compose.yml up -d",
+    "db:down": "docker compose -f infra/docker/docker-compose.yml down",
+    "db:logs": "docker compose -f infra/docker/docker-compose.yml logs -f",
+    "db:reset": "docker compose -f infra/docker/docker-compose.yml down -v && pnpm db:up",
+    "dev:api": "cd apps/api && uv run uvicorn mixsight.main:app --reload --port 8000",
+    "dev:web": "pnpm --filter @mixsight/web dev",
+    "test:api": "cd apps/api && uv run pytest",
+    "typecheck:api": "cd apps/api && uv run mypy src",
+    "lint:api": "cd apps/api && uv run ruff check src",
+    "format:api": "cd apps/api && uv run ruff format src",
+    "migrate": "cd apps/api && uv run alembic upgrade head",
+    "migrate:down": "cd apps/api && uv run alembic downgrade -1",
+    "migrate:history": "cd apps/api && uv run alembic history"
+  }
+}

@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Build outputs
+.next/
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.vs/
+.idea/
+*.swp
+.DS_Store
+
+# Env files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Test outputs
+.pytest_cache/
+.coverage
+htmlcov/
+tests/artifacts/
+coverage/
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Database (local dev)
+*.sqlite
+*.db
+postgres-data/
+redis-data/
+
+# Logs
+*.log
+logs/
+
+# Claude Code local-only artifacts (per-user settings shouldn't be checked in)
+.claude/settings.local.json
+
+# Generated artifacts
+apps/web/src/types/api.ts

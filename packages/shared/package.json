@@ -1,0 +1,8 @@
+{
+  "name": "@mixsight/shared",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Cross-app constants, enums, validation shared between apps/web and apps/api consumers.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts"
+}
