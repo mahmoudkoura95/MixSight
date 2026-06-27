@@ -29,7 +29,11 @@ from mixsight.connectors.csv.meta_ads_manager import (
     MetaCsvParseError,
     MetaCsvSchemaMismatchError,
 )
-from mixsight.connectors.csv.service import CurrencyMismatchError, ingest_meta_csv
+from mixsight.connectors.csv.service import (
+    CurrencyMismatchError,
+    MarketNotUnderClientError,
+    ingest_meta_csv,
+)
 from mixsight.db import get_db
 from mixsight.models.user import User
 from mixsight.tenancy import enforce_client_access
@@ -56,6 +60,11 @@ async def upload_meta_csv_actuals(
             market_id=market_id,
             user_id=user.id,
         )
+    except MarketNotUnderClientError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "market_not_found", "message": "Market not found"},
+        ) from e
     except MetaCsvSchemaMismatchError as e:
         await db.commit()  # persist the failure audit row
         raise HTTPException(

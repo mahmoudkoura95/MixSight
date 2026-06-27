@@ -18,7 +18,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mixsight.models import AuditLog, Organization
+from mixsight.models import AuditLog, EncryptedSecret, Organization
 
 
 @pytest.mark.asyncio
@@ -142,3 +142,74 @@ async def test_audit_log_organization_hard_delete(db_session: AsyncSession) -> N
     assert audit.before is not None
     assert audit.before["name"] == "Audit hook hard-delete test"
     assert audit.after is None
+
+
+@pytest.mark.asyncio
+async def test_encrypted_secret_ciphertext_is_redacted_on_create(
+    db_session: AsyncSession,
+) -> None:
+    """The guard rail "never log customer API keys": EncryptedSecret declares
+    `ciphertext` in `__audit_scrub__`, so the create AuditLog row records the
+    event but redacts the secret value."""
+    org = Organization(name="Secret org")
+    db_session.add(org)
+    await db_session.commit()
+    await db_session.refresh(org)
+
+    secret_bytes = b"super-secret-oauth-token-value"
+    secret = EncryptedSecret(
+        organization_id=org.id,
+        ciphertext=secret_bytes,
+        key_version=1,
+        purpose="oauth_token",
+    )
+    db_session.add(secret)
+    await db_session.commit()
+    await db_session.refresh(secret)
+
+    audit = (
+        await db_session.execute(
+            select(AuditLog).where(AuditLog.entity_id == secret.id, AuditLog.action == "created")
+        )
+    ).scalar_one()
+    assert audit.entity_type == "encrypted_secrets"
+    assert audit.after is not None
+    assert audit.after["ciphertext"] == "[redacted]"
+    # The real secret must not appear anywhere in the snapshot.
+    assert secret_bytes.decode() not in str(audit.after)
+    # Non-sensitive fields are still recorded for the audit trail.
+    assert audit.after["purpose"] == "oauth_token"
+
+
+@pytest.mark.asyncio
+async def test_encrypted_secret_ciphertext_is_redacted_on_update(
+    db_session: AsyncSession,
+) -> None:
+    org = Organization(name="Secret org update")
+    db_session.add(org)
+    await db_session.commit()
+    await db_session.refresh(org)
+
+    secret = EncryptedSecret(
+        organization_id=org.id,
+        ciphertext=b"original-token",
+        key_version=1,
+    )
+    db_session.add(secret)
+    await db_session.commit()
+    await db_session.refresh(secret)
+
+    secret.ciphertext = b"rotated-token"
+    await db_session.commit()
+
+    audit = (
+        await db_session.execute(
+            select(AuditLog).where(AuditLog.entity_id == secret.id, AuditLog.action == "updated")
+        )
+    ).scalar_one()
+    assert audit.before is not None
+    assert audit.after is not None
+    assert audit.before["ciphertext"] == "[redacted]"
+    assert audit.after["ciphertext"] == "[redacted]"
+    assert "original-token" not in str(audit.before)
+    assert "rotated-token" not in str(audit.after)

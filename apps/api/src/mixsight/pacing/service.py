@@ -18,13 +18,14 @@ Phase 1a Week 3 simplifications:
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
@@ -53,14 +54,13 @@ class _CampaignActuals:
     distinct_days_in_week: int
 
 
-@dataclass(frozen=True)
-class _CampaignHistory:
-    """14-day lookback distinct-day count per campaign for the §7.10 step 1
-    sufficiency check. Decoupled from in-week rollup because the snapshot
-    week is at most 7 days — using in-week distinct days for the
-    insufficient_data threshold would gate every line forever."""
+# Status badges ordered worst-last; used to roll a line's spend + KPI status
+# up to a single badge by taking the more severe of the two.
+_STATUS_SEVERITY = {"green": 0, "amber": 1, "red": 2, "critical": 3}
 
-    distinct_days_lookback: int
+
+def _worse_status(a: str, b: str) -> str:
+    return a if _STATUS_SEVERITY[a] >= _STATUS_SEVERITY[b] else b
 
 
 def _week_window(week_ending: date) -> tuple[date, date]:
@@ -177,11 +177,12 @@ async def _rollup_actuals(
 
 async def _history_days(
     db: AsyncSession, client_id: UUID, market_id: UUID, week_ending: date
-) -> dict[str, _CampaignHistory]:
-    """Distinct-day count over the §7.10 step 1 14-day lookback ending at
-    `week_ending`. Used solely for the insufficient_data threshold —
-    separate from the in-week rollup so the snapshot week's natural
-    7-day ceiling doesn't permanently gate every campaign."""
+) -> dict[str, int]:
+    """`{campaign_label: distinct days of actuals}` over the §7.10 step 1
+    14-day lookback ending at `week_ending`. Used solely for the
+    insufficient_data threshold — separate from the in-week rollup so the
+    snapshot week's natural 7-day ceiling doesn't permanently gate every
+    campaign."""
     lookback_start = week_ending - timedelta(days=_INSUFFICIENT_DATA_DAY_THRESHOLD - 1)
     stmt = (
         select(
@@ -197,9 +198,7 @@ async def _history_days(
         .group_by(col(Actuals.campaign_label))
     )
     rows = (await db.execute(stmt)).all()
-    return {
-        row.campaign_label: _CampaignHistory(distinct_days_lookback=row.days or 0) for row in rows
-    }
+    return {row.campaign_label: (row.days or 0) for row in rows}
 
 
 async def generate_snapshot(
@@ -250,9 +249,7 @@ async def generate_snapshot(
             plan_line.campaign_label or "",
             _CampaignActuals(spend_local=Decimal(0), conversions=None, distinct_days_in_week=0),
         )
-        history_days = history_by_label.get(
-            plan_line.campaign_label or "", _CampaignHistory(distinct_days_lookback=0)
-        ).distinct_days_lookback
+        history_days = history_by_label.get(plan_line.campaign_label or "", 0)
         planned_spend_to_date = _planned_to_date(plan_line.planned_spend_local, days_elapsed)
         planned_kpi_to_date = (
             _planned_to_date(plan_line.kpi_target, days_elapsed) if plan_line.kpi_target else None
@@ -269,16 +266,12 @@ async def generate_snapshot(
                 if planned_kpi_to_date is not None
                 else None
             )
-            # Status takes the worst of the two signals so an AM looking at
+            # Status takes the worse of the two signals so an AM looking at
             # a green spend / red KPI row doesn't get a falsely-reassuring
             # green badge.
             spend_status = _classify(spend_drift_pct)
             kpi_status = _classify(kpi_drift_pct) if kpi_drift_pct is not None else "green"
-            status = max(
-                spend_status,
-                kpi_status,
-                key=lambda s: ("green", "amber", "red", "critical", "insufficient_data").index(s),
-            )
+            status = _worse_status(spend_status, kpi_status)
 
         db.add(
             PacingSnapshotLine(
@@ -315,6 +308,63 @@ async def latest_snapshot_for_week(
         .limit(1)
     )
     return (await db.execute(stmt)).scalar_one_or_none()
+
+
+def _snapshot_lock_key(client_id: UUID, market_id: UUID, week_ending: date) -> int:
+    """Stable signed 64-bit key for `pg_advisory_xact_lock`, derived from the
+    (client, market, week) tuple."""
+    raw = f"{client_id}:{market_id}:{week_ending.isoformat()}".encode()
+    return int.from_bytes(hashlib.blake2b(raw, digest_size=8).digest(), "big", signed=True)
+
+
+async def get_or_create_snapshot(
+    db: AsyncSession,
+    *,
+    organization_id: UUID,
+    client_id: UUID,
+    market_id: UUID,
+    week_ending: date,
+    allocation_mode: str = "mode_a",
+) -> PacingSnapshot | None:
+    """Return the week's snapshot, generating it once if none exists yet.
+
+    The pacing view and the reallocation view both load on demand and run in
+    parallel, so two requests can find "no snapshot" at the same instant and
+    each generate one. A transaction-level Postgres advisory lock serialises
+    the create so a single week never produces duplicate snapshots; the
+    cheap pre-check skips the lock once a snapshot already exists. Raw SQL is
+    used because advisory locks have no ORM equivalent (per apps/api
+    CLAUDE.md: raw SQL allowed when explicitly needed, documented here).
+
+    Returns None when no active Plan covers the week — caller surfaces the
+    §7.18 `no_active_plan` empty state. The caller commits the session, which
+    also releases the advisory lock.
+    """
+    existing = await latest_snapshot_for_week(
+        db, client_id=client_id, market_id=market_id, week_ending=week_ending
+    )
+    if existing is not None:
+        return existing
+
+    lock_key = _snapshot_lock_key(client_id, market_id, week_ending)
+    await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+
+    # Re-check under the lock: a concurrent request may have created it while
+    # we waited.
+    existing = await latest_snapshot_for_week(
+        db, client_id=client_id, market_id=market_id, week_ending=week_ending
+    )
+    if existing is not None:
+        return existing
+
+    return await generate_snapshot(
+        db,
+        organization_id=organization_id,
+        client_id=client_id,
+        market_id=market_id,
+        week_ending=week_ending,
+        allocation_mode=allocation_mode,
+    )
 
 
 def default_week_ending(today: date) -> date:

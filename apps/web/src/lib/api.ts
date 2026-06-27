@@ -3,9 +3,9 @@
  *
  * Resolves the Clerk session JWT via `auth().getToken()` and forwards it
  * as `Authorization: Bearer <jwt>`. The FastAPI `current_user` dependency
- * verifies via JWKS and (Day 2 work) JIT-provisions an Organization +
- * User row when the webhook hasn't synced yet, so first-time requests
- * succeed without a manual onboarding step.
+ * verifies via JWKS and JIT-provisions an Organization + User row when the
+ * webhook hasn't synced yet, so first-time requests succeed without a manual
+ * onboarding step.
  *
  * Returns the parsed JSON body when the HTTP status is 2xx; throws
  * `ApiError` with the raw response otherwise so server components can

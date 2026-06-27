@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import ClassVar
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, LargeBinary, Text, func
 from sqlalchemy.dialects.postgresql import UUID
@@ -21,6 +22,11 @@ from mixsight.models.base import SQLModel, pk_column
 
 class EncryptedSecret(SQLModel, table=True):
     __tablename__ = "encrypted_secrets"
+
+    # Fields the AuditLog hook must never persist in before/after snapshots —
+    # the ciphertext is the secret. Audit rows still record that the secret
+    # was created/updated/deleted, just with the value redacted.
+    __audit_scrub__: ClassVar[frozenset[str]] = frozenset({"ciphertext"})
 
     id: uuid.UUID = Field(default=None, sa_column=pk_column())
     organization_id: uuid.UUID = Field(

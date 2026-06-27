@@ -45,20 +45,38 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
+_REDACTED = "[redacted]"
+
+
+def _scrub_fields(target: Any) -> frozenset[str]:
+    """Field names this model marks as sensitive (e.g. EncryptedSecret's
+    ciphertext). Never written verbatim into AuditLog."""
+    fields: frozenset[str] = getattr(type(target), "__audit_scrub__", frozenset())
+    return fields
+
+
 def _serialize(target: Any) -> dict[str, Any]:
-    """Dump a SQLModel instance to a JSON-safe dict (full snapshot)."""
+    """Dump a SQLModel instance to a JSON-safe dict (full snapshot), with any
+    `__audit_scrub__` fields redacted."""
     raw = target.model_dump(mode="json")
-    return {k: v for k, v in raw.items() if not k.startswith("_")}
+    scrub = _scrub_fields(target)
+    return {k: (_REDACTED if k in scrub else v) for k, v in raw.items() if not k.startswith("_")}
 
 
 def _change_diff(target: Any) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Return `(before, after)` dicts of fields that changed on this flush."""
+    """Return `(before, after)` dicts of fields that changed on this flush,
+    with any `__audit_scrub__` fields redacted on both sides."""
     inspector = inspect(target)
+    scrub = _scrub_fields(target)
     before: dict[str, Any] = {}
     after: dict[str, Any] = {}
     for attr in inspector.attrs:
         history = attr.history
         if not history.has_changes():
+            continue
+        if attr.key in scrub:
+            before[attr.key] = _REDACTED
+            after[attr.key] = _REDACTED
             continue
         old = history.deleted[0] if history.deleted else None
         new = history.added[0] if history.added else None

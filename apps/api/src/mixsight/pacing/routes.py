@@ -35,11 +35,7 @@ from mixsight.pacing.reallocation import (
     compute_suggestions_for_snapshot,
     latest_suggestions_for_snapshot,
 )
-from mixsight.pacing.service import (
-    default_week_ending,
-    generate_snapshot,
-    latest_snapshot_for_week,
-)
+from mixsight.pacing.service import default_week_ending, get_or_create_snapshot
 from mixsight.tenancy import enforce_client_access
 
 router = APIRouter(prefix="/clients", tags=["pacing"])
@@ -110,18 +106,14 @@ async def get_pacing(
     market = await _check_market_under_client(db, client_id, market_id)
     week_ending = default_week_ending(datetime.now(UTC).date())
 
-    snapshot = await latest_snapshot_for_week(
-        db, client_id=client_id, market_id=market_id, week_ending=week_ending
+    snapshot = await get_or_create_snapshot(
+        db,
+        organization_id=user.organization_id,
+        client_id=client_id,
+        market_id=market_id,
+        week_ending=week_ending,
     )
-    if snapshot is None:
-        snapshot = await generate_snapshot(
-            db,
-            organization_id=user.organization_id,
-            client_id=client_id,
-            market_id=market_id,
-            week_ending=week_ending,
-        )
-        await db.commit()
+    await db.commit()
 
     if snapshot is None:
         # §7.18: "no_active_plan" empty state — return enough for the UI to
@@ -192,18 +184,14 @@ async def get_reallocation_suggestions(
     await _check_market_under_client(db, client_id, market_id)
     week_ending = default_week_ending(datetime.now(UTC).date())
 
-    snapshot = await latest_snapshot_for_week(
-        db, client_id=client_id, market_id=market_id, week_ending=week_ending
+    snapshot = await get_or_create_snapshot(
+        db,
+        organization_id=user.organization_id,
+        client_id=client_id,
+        market_id=market_id,
+        week_ending=week_ending,
     )
-    if snapshot is None:
-        snapshot = await generate_snapshot(
-            db,
-            organization_id=user.organization_id,
-            client_id=client_id,
-            market_id=market_id,
-            week_ending=week_ending,
-        )
-        await db.commit()
+    await db.commit()
 
     if snapshot is None:
         return {

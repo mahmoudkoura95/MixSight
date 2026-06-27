@@ -42,6 +42,7 @@ from sqlmodel import col, select
 
 from mixsight.logging import get_logger
 from mixsight.models import (
+    Market,
     PacingSnapshot,
     PacingSnapshotLine,
     PlanLine,
@@ -88,8 +89,8 @@ async def _fetch_lines_with_plan(db: AsyncSession, snapshot_id: UUID) -> Sequenc
     return [_LineWithPlan(snapshot_line=sl, plan_line=pl) for sl, pl in rows]
 
 
-def _is_donor(lwp: _LineWithPlan) -> bool:
-    sl = lwp.snapshot_line
+def _is_donor(line: _LineWithPlan) -> bool:
+    sl = line.snapshot_line
     if sl.status == "insufficient_data":
         return False
     return (
@@ -100,8 +101,8 @@ def _is_donor(lwp: _LineWithPlan) -> bool:
     )
 
 
-def _is_receiver(lwp: _LineWithPlan) -> bool:
-    sl = lwp.snapshot_line
+def _is_receiver(line: _LineWithPlan) -> bool:
+    sl = line.snapshot_line
     if sl.status == "insufficient_data":
         return False
     return (
@@ -140,15 +141,15 @@ def _project_delta(
     return (amount * (receiver_eff - donor_eff)).quantize(Decimal("0.0001"))
 
 
-def _score_confidence(amount: Decimal, donor: _LineWithPlan, receiver: _LineWithPlan) -> Decimal:
-    """Phase 1a heuristic — three signals:
-      a) absolute amount magnitude vs donor plan (bigger ratio → riskier
-         → lower confidence on overshoot, but more material if right);
-      b) drift magnitude on both sides (clearer signal → higher);
-      c) flat-rate base of 0.5.
-    Returned in 0.0–1.0. §7.10 step 9 lists data volume + weekly stability
-    as additional inputs; those need multi-week history that Phase 1a
-    doesn't have until Week 4+. The MMM-derived confidence ships Phase 2."""
+def _score_confidence(donor: _LineWithPlan, receiver: _LineWithPlan) -> Decimal:
+    """Phase 1a confidence heuristic, returned in 0.0–1.0.
+
+    A flat base of 0.5, plus a bonus that grows with the combined drift
+    magnitude on both lines (a clearer signal earns more confidence), capped
+    so a single suggestion can't exceed 0.9. §7.10 step 9 also lists data
+    volume and week-over-week stability as inputs; those need multi-week
+    history we don't have yet, and the MMM-derived confidence ships Phase 2.
+    """
     base = Decimal("0.50")
     if (
         donor.snapshot_line.spend_drift_pct is None
@@ -163,16 +164,23 @@ def _score_confidence(amount: Decimal, donor: _LineWithPlan, receiver: _LineWith
 
 
 def _rationale(
-    amount: Decimal, donor: _LineWithPlan, receiver: _LineWithPlan, delta: Decimal | None
+    amount: Decimal,
+    donor: _LineWithPlan,
+    receiver: _LineWithPlan,
+    delta: Decimal | None,
+    currency: str,
 ) -> str:
     """Plain-English summary surfaced in the UI — "options with evidence"
-    framing locked in CLAUDE.md (never "we recommend")."""
+    framing locked in CLAUDE.md (never "we recommend"). `amount` is in the
+    market's local currency, so the rationale prefixes it with that ISO code
+    rather than a hardcoded symbol."""
     donor_label = donor.plan_line.campaign_label or "donor"
     receiver_label = receiver.plan_line.campaign_label or "receiver"
     delta_str = f"≈ +{delta}" if delta is not None else "uncertain Δ"
     return (
-        f"Option: move £{amount} from {donor_label} (overpacing + underperforming) "
-        f"to {receiver_label} (underpacing + overperforming). Projected impact: "
+        f"Option: move {currency} {amount} from {donor_label} "
+        f"(overpacing + underperforming) to {receiver_label} "
+        f"(underpacing + overperforming). Projected impact: "
         f"{delta_str} {receiver.plan_line.objective_type}."
     )
 
@@ -181,9 +189,12 @@ async def compute_suggestions_for_snapshot(
     db: AsyncSession, snapshot: PacingSnapshot
 ) -> list[ReallocationSuggestion]:
     """End-to-end §7.10 algorithm. Caller commits the session."""
+    market = await db.get(Market, snapshot.market_id)
+    currency = market.local_currency if market and market.local_currency else "GBP"
+
     lines = await _fetch_lines_with_plan(db, snapshot.id)
-    donors = [lwp for lwp in lines if _is_donor(lwp)]
-    receivers = [lwp for lwp in lines if _is_receiver(lwp)]
+    donors = [line for line in lines if _is_donor(line)]
+    receivers = [line for line in lines if _is_receiver(line)]
 
     candidates: list[tuple[_LineWithPlan, _LineWithPlan, Decimal, Decimal | None, Decimal]] = []
     for donor in donors:
@@ -196,7 +207,13 @@ async def compute_suggestions_for_snapshot(
             if amount <= 0:
                 continue
             delta = _project_delta(amount, donor, receiver)
-            confidence = _score_confidence(amount, donor, receiver)
+            # Skip moves projected to leave the KPI flat or worse: the donor's
+            # realized efficiency is >= the receiver's, so shifting budget
+            # wouldn't help. A None delta (efficiency uncomputable) is kept —
+            # it's directionally valid and ranks last.
+            if delta is not None and delta <= 0:
+                continue
+            confidence = _score_confidence(donor, receiver)
             candidates.append((donor, receiver, amount, delta, confidence))
 
     candidates.sort(key=lambda c: -(abs(c[3]) if c[3] is not None else Decimal(0)))
@@ -215,7 +232,7 @@ async def compute_suggestions_for_snapshot(
             projected_delta_units=receiver.plan_line.objective_type,
             confidence=confidence,
             scope=_SCOPE_WITHIN_MARKET,
-            rationale_text=_rationale(amount, donor, receiver, delta),
+            rationale_text=_rationale(amount, donor, receiver, delta, currency),
         )
         db.add(suggestion)
         await db.flush()

@@ -264,6 +264,43 @@ async def test_reallocation_writes_suggestion_and_recommendation_log(
 
 
 @pytest.mark.asyncio
+async def test_reallocation_skips_negative_projected_delta(
+    db_session: AsyncSession,
+) -> None:
+    """A pair can qualify on drift (donor overpacing+underperforming,
+    receiver underpacing+overperforming) yet still have the receiver's
+    realized efficiency *below* the donor's — moving budget would lower the
+    KPI. Such negative-delta moves must not be surfaced as options.
+
+    Donor has a high planned KPI (so it underperforms vs plan) but high
+    absolute KPI/spend; receiver has a low planned KPI (so it overperforms
+    vs plan) but low absolute KPI/spend.
+    """
+    week_ending = default_week_ending(date.today())
+    org, client, market, _plan = await _build_scenario(
+        db_session,
+        suffix="negdelta",
+        week_ending=week_ending,
+        line_overrides=[
+            ("Donor", "conversions", Decimal("1000.00"), Decimal("1000"), 1.25, 0.70),
+            ("Receiver", "conversions", Decimal("1000.00"), Decimal("100"), 0.65, 1.45),
+        ],
+    )
+    snapshot = await generate_snapshot(
+        db_session,
+        organization_id=org.id,
+        client_id=client.id,
+        market_id=market.id,
+        week_ending=week_ending,
+    )
+    await db_session.commit()
+    assert snapshot is not None
+    suggestions = await compute_suggestions_for_snapshot(db_session, snapshot)
+    await db_session.commit()
+    assert suggestions == [], "negative projected-delta moves must not be suggested"
+
+
+@pytest.mark.asyncio
 async def test_reallocation_compatible_objective_types_only(
     db_session: AsyncSession,
 ) -> None:

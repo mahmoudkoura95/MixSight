@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
 from mixsight.connectors.csv.meta_ads_manager import (
+    MetaActualsRecord,
     MetaCsvParseError,
     MetaCsvParseResult,
     MetaCsvSchemaMismatchError,
@@ -59,6 +60,11 @@ class CurrencyMismatchError(Exception):
     """CSV's spend column currency doesn't match the Market.local_currency."""
 
 
+class MarketNotUnderClientError(Exception):
+    """The named market exists but doesn't belong to the named client. A
+    routing error, not a tenancy breach — the route maps it to 404."""
+
+
 async def _emit_event(
     db: AsyncSession,
     *,
@@ -87,20 +93,20 @@ async def _upsert_actuals_row(
     organization_id: UUID,
     client_id: UUID,
     market_id: UUID,
-    record: object,  # MetaActualsRecord — kept loose to avoid mypy import cycle
+    record: MetaActualsRecord,
     pull_timestamp: datetime,
     pull_window_start: datetime,
     pull_window_end: datetime,
 ) -> bool:
-    """Returns True if a new row was inserted, False if existing was updated."""
-    # mypy can't narrow the loose param; resolve attrs once.
-    campaign_external_id: str = record.campaign_external_id  # type: ignore[attr-defined]
+    """Insert or update one Actuals row on the §7.14 idempotency key.
+    Returns True if a new row was inserted, False if an existing one was
+    updated."""
     stmt = select(Actuals).where(
         col(Actuals.client_id) == client_id,
         col(Actuals.market_id) == market_id,
         col(Actuals.channel) == _CHANNEL_META,
-        col(Actuals.campaign_external_id) == campaign_external_id,
-        col(Actuals.date) == record.date,  # type: ignore[attr-defined]
+        col(Actuals.campaign_external_id) == record.campaign_external_id,
+        col(Actuals.date) == record.date,
         col(Actuals.source) == _SOURCE_CSV_UPLOAD,
     )
     existing = (await db.execute(stmt)).scalar_one_or_none()
@@ -111,14 +117,14 @@ async def _upsert_actuals_row(
                 client_id=client_id,
                 market_id=market_id,
                 channel=_CHANNEL_META,
-                campaign_external_id=campaign_external_id,
-                campaign_label=record.campaign_label,  # type: ignore[attr-defined]
-                date=record.date,  # type: ignore[attr-defined]
-                spend_local=record.spend_local,  # type: ignore[attr-defined]
-                impressions=record.impressions,  # type: ignore[attr-defined]
-                clicks=record.clicks,  # type: ignore[attr-defined]
-                conversions=record.conversions,  # type: ignore[attr-defined]
-                conversions_value=record.conversions_value,  # type: ignore[attr-defined]
+                campaign_external_id=record.campaign_external_id,
+                campaign_label=record.campaign_label,
+                date=record.date,
+                spend_local=record.spend_local,
+                impressions=record.impressions,
+                clicks=record.clicks,
+                conversions=record.conversions,
+                conversions_value=record.conversions_value,
                 source=_SOURCE_CSV_UPLOAD,
                 pull_timestamp=pull_timestamp,
                 pull_window_start=pull_window_start.date(),
@@ -127,12 +133,12 @@ async def _upsert_actuals_row(
         )
         return True
 
-    existing.campaign_label = record.campaign_label  # type: ignore[attr-defined]
-    existing.spend_local = record.spend_local  # type: ignore[attr-defined]
-    existing.impressions = record.impressions  # type: ignore[attr-defined]
-    existing.clicks = record.clicks  # type: ignore[attr-defined]
-    existing.conversions = record.conversions  # type: ignore[attr-defined]
-    existing.conversions_value = record.conversions_value  # type: ignore[attr-defined]
+    existing.campaign_label = record.campaign_label
+    existing.spend_local = record.spend_local
+    existing.impressions = record.impressions
+    existing.clicks = record.clicks
+    existing.conversions = record.conversions
+    existing.conversions_value = record.conversions_value
     existing.pull_timestamp = pull_timestamp
     existing.pull_window_start = pull_window_start.date()
     existing.pull_window_end = pull_window_end.date()
@@ -160,18 +166,10 @@ async def ingest_meta_csv(
     pull_timestamp = datetime.now(UTC)
     market = await db.get(Market, market_id)
     if market is None or market.client_id != client_id:
-        # Not a tenant breach (enforce_client_access already passed) but a
-        # mismatched market under the client. Write a schema_mismatch event
-        # so the audit story is complete; the route maps this to 404.
-        await _emit_event(
-            db,
-            organization_id=organization_id,
-            user_id=user_id,
-            event_type="schema_mismatch",
-            success=False,
-            error_message=f"market_id {market_id} not under client_id {client_id}",
-        )
-        raise CurrencyMismatchError(
+        # Not a tenant breach (enforce_client_access already passed) and not a
+        # connector failure either — just a market that isn't under this
+        # client. No ConnectorAuthEvent; the route maps this to 404.
+        raise MarketNotUnderClientError(
             f"market_id {market_id} does not belong to client_id {client_id}"
         )
 

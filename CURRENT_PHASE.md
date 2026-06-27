@@ -64,7 +64,7 @@ DEPLOYED_INFRA: deferred to Phase 1c (see ADR-004)
 
 **MEDIUM (Week 4 if time allows, deferred from Week 2 + flagged again):**
 - [ ] Concurrent webhook race → IntegrityError → 500 → Clerk retry (also affects JIT provisioning race). Fix with `INSERT ... ON CONFLICT DO NOTHING` and re-query.
-- [ ] EncryptedSecret ciphertext written into AuditLog before/after. Fix: exclude EncryptedSecret from `register_audit_hooks` OR add `__audit_scrub__` field allowlist.
+- [x] EncryptedSecret ciphertext written into AuditLog before/after. **Fixed in the 2026-06-27 review pass** via `__audit_scrub__` field set on the model + redaction in the audit hook's `_serialize` / `_change_diff`. Audit row still records the create/update/delete; the value is `[redacted]`. Coverage: 2 tests in `test_audit_log_hook.py`.
 - [ ] Tenancy audit silent degrade — `_route_parameter_names` catches all `get_type_hints` errors; narrow the except + log a warning on fallback.
 
 **NEW MEDIUM (from this week's code):**
@@ -74,11 +74,33 @@ DEPLOYED_INFRA: deferred to Phase 1c (see ADR-004)
 **NEW LOW:**
 - [ ] Pacing service's status combiner takes the worst of (spend_status, kpi_status). UX call worth surfacing — green spend + critical KPI rolls up as "critical" today; AM may want richer "kpi-critical" distinction in Phase 1b.
 - [ ] `apps/web` dev server may need a restart after Day 5 routes were added (hot-reload sometimes doesn't pick up new dynamic-param routes — `pnpm build` confirms the route is registered).
-- [ ] Service-layer type ignores on `record: object` in `connectors/csv/service._upsert_actuals_row` — replace with a proper Protocol when a second CSV format implementation lands in Week 4.
+- [x] Service-layer type ignores on `record: object` in `connectors/csv/service._upsert_actuals_row` — **fixed in the 2026-06-27 review pass**: typed as `MetaActualsRecord` (no real import cycle existed), all 12 `# type: ignore` removed.
 - [ ] `EmptyState` component inlined in pacing page; extract to `packages/shared/` when second pacing surface (current-week view, Phase 1c) needs it.
 - [ ] Frontend env var `NEXT_PUBLIC_API_BASE_URL` defaults to `http://localhost:8000`; document in `apps/web/.env.example` once deployed-infra decision lands (Phase 1c per ADR-004).
 
 **No formal `/code-review` run this week — user-initiated per CLAUDE.md.** Flag at next session if the carry-over list above needs `/code-review --effort high` validation.
+
+### Code-review + clarity refactor pass (2026-06-27)
+
+User-initiated full review + refactor of the Weeks 1-3 surface. Repo put under git for the first time (baseline on `origin/main`; this pass on branch `refactor/code-review-pass`). Scope citations kept per CLAUDE.md; only stale dev-narrative + cryptic names trimmed.
+
+**Correctness bugs fixed (with tests):**
+- Reallocation ranked KPI-reducing moves as top "options" — `reallocation.py` ranked by `abs(delta)`, so a negative projected delta (receiver efficiency below donor) surfaced high and rendered as `≈ +-N`. Now non-positive deltas are dropped. Test: `test_reallocation_skips_negative_projected_delta`.
+- `_score_confidence` took an unused `amount` arg whose docstring claimed a signal the code never used — removed; docstring corrected.
+- Reallocation rationale hardcoded `£` regardless of market — now prefixes the market's ISO currency code (resolved from `Market.local_currency`).
+- CSV upload to a market not under the client returned 422 `csv_currency_mismatch` (misleading) — now a proper 404 via new `MarketNotUnderClientError`; no spurious `schema_mismatch` ConnectorAuthEvent. Test: `test_market_not_under_client_raises_404_error_with_no_event`.
+- Duplicate-snapshot race: the pacing view + reallocation view load in parallel and both generate-on-demand, creating two snapshots for one week. New `get_or_create_snapshot` serialises the create with a transaction-level Postgres advisory lock (double-checked); both routes go through it.
+
+**Clarity / jargon (citations preserved):**
+- `main.py` docstring rewritten (it still described a "Week 1 skeleton" that boots without the audit/tenancy wiring it now installs).
+- `connectors/csv/service._upsert_actuals_row` typed as `MetaActualsRecord` (see carry-over above).
+- `pacing/service.py`: dropped the single-field `_CampaignHistory` wrapper for `dict[str, int]`; replaced the `max(..., key=tuple.index)` worst-status trick with a small `_STATUS_SEVERITY` map + `_worse_status`.
+- `reallocation.py`: cryptic `lwp` local renamed to `line`.
+- `apps/web/src/lib/api.ts`: dropped "(Day 2 work)" dev-narrative.
+
+**Quality bar green:** ruff (lint+format), mypy strict (62 files), pytest **55 passed** (51 + 4 new), web typecheck + lint.
+
+**Not addressed (still open carry-overs):** webhook concurrent-insert race, tenancy-audit silent degrade, the "JWT carries no org_id" 401 test, CSV per-row→bulk upsert (by design for Phase 1a), `EmptyState` extraction.
 
 ### Week 3 active decisions (locked 2026-06-26)
 

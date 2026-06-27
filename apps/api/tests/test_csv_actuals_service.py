@@ -16,7 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
 from mixsight.connectors.csv.meta_ads_manager import MetaCsvSchemaMismatchError
-from mixsight.connectors.csv.service import CurrencyMismatchError, ingest_meta_csv
+from mixsight.connectors.csv.service import (
+    CurrencyMismatchError,
+    MarketNotUnderClientError,
+    ingest_meta_csv,
+)
 from mixsight.models import Actuals, Client, ConnectorAuthEvent, ConnectorPull, Market, Organization
 
 _CSV_HEADER = (
@@ -180,6 +184,32 @@ async def test_schema_mismatch_persists_failed_pull_and_event(
     ).scalar_one()
     assert event.event_type == "schema_mismatch"
     assert event.success is False
+
+
+@pytest.mark.asyncio
+async def test_market_not_under_client_raises_404_error_with_no_event(
+    db_session: AsyncSession,
+) -> None:
+    """A market that belongs to a different client is a routing error, not a
+    currency or connector failure: it raises MarketNotUnderClientError (the
+    route maps it to 404) and emits no ConnectorAuthEvent."""
+    org_a, client_a, _market_a = await _build_tenant(db_session, suffix="mnucA")
+    _org_b, _client_b, market_b = await _build_tenant(db_session, suffix="mnucB")
+    body = _csv("2026-06-23,c_001,X,100.00,1000,50,2.0,500.00")
+
+    with pytest.raises(MarketNotUnderClientError):
+        await ingest_meta_csv(
+            db_session,
+            file_bytes=body,
+            organization_id=org_a.id,
+            client_id=client_a.id,
+            market_id=market_b.id,  # belongs to client_b, not client_a
+            user_id=None,
+        )
+    await db_session.commit()
+
+    events = list((await db_session.execute(select(ConnectorAuthEvent))).scalars().all())
+    assert events == [], "a routing error must not write a ConnectorAuthEvent"
 
 
 @pytest.mark.asyncio

@@ -1,8 +1,9 @@
 """FastAPI app entrypoint.
 
-Week 1 skeleton. Tenancy harness (§7.19) and AuditLog hook (§7.4) wire in
-during Day 4-5 — for now the app just boots, talks to Postgres, and exposes
-`/healthz`.
+Configures logging, installs the request-context middleware, mounts the
+routers (Clerk webhooks, CSV actuals, pacing), and runs the startup
+invariants: registering the §7.4 AuditLog hooks and the §7.19 tenancy route
+audit, both of which fail loud at import. Also exposes `/healthz`.
 """
 
 from __future__ import annotations
