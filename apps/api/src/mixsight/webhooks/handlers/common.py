@@ -9,23 +9,27 @@ from mixsight.logging import get_logger
 
 log = get_logger("mixsight.webhooks.clerk.handlers")
 
-# Per §7.19 + §6.3: Clerk's custom organization roles map to our two-role model.
+# Per §7.19 + §6.3: Clerk's custom organization roles map to our two-role
+# model. Keys are the un-prefixed role (the `org:` prefix is stripped before
+# lookup), so both `org:admin` (webhook) and `admin` (session token) resolve.
 _CLERK_ROLE_MAP = {
-    "org:admin": "admin",
-    "org:account_manager": "account_manager",
+    "admin": "admin",
+    "account_manager": "account_manager",
 }
 
 
 def map_clerk_role(clerk_role: str | None) -> str:
     """Map a Clerk org-membership role to our `User.role` enum.
 
-    Unknown roles default to `account_manager` (least-privileged) + log a
-    warning so role-mapping drift is observable.
+    Accepts both the webhook form (`org:admin`) and the session-token `o.rol`
+    form (`admin`) by stripping an optional `org:` prefix. Unknown roles
+    default to `account_manager` (least-privileged) + log a warning so
+    role-mapping drift is observable.
     """
     if clerk_role is None:
         log.warning("clerk_webhook.role_missing", default="account_manager")
         return "account_manager"
-    mapped = _CLERK_ROLE_MAP.get(clerk_role)
+    mapped = _CLERK_ROLE_MAP.get(clerk_role.removeprefix("org:"))
     if mapped is None:
         log.warning(
             "clerk_webhook.role_unknown",

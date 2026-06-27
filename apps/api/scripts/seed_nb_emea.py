@@ -40,6 +40,7 @@ from mixsight.models import (
     Plan,
     PlanLine,
 )
+from mixsight.pacing.service import default_week_ending
 
 # Stable seed so re-runs produce identical Actuals; lets tests assert
 # specific values instead of just shapes. Deterministic test data is not
@@ -118,12 +119,6 @@ _CAMPAIGNS: list[tuple[str, str, str, Decimal, Decimal, float, float]] = [
         1.00,
     ),
 ]
-
-
-def _current_week_window(today: date) -> tuple[date, date]:
-    """Monday → Sunday containing `today`."""
-    monday = today - timedelta(days=today.weekday())
-    return monday, monday + timedelta(days=6)
 
 
 async def _upsert_organization(db: AsyncSession, clerk_org_id: str) -> Organization:
@@ -331,8 +326,12 @@ async def seed(*, dry_run: bool = False) -> None:
     print(  # noqa: T201 — seed scripts emit to stdout
         f"[seed] starting at {datetime.now(UTC).isoformat()}", flush=True
     )
-    today = date.today()
-    period_start, period_end = _current_week_window(today)
+    # Match the pacing endpoint, which snapshots the last completed week in UTC
+    # (default_week_ending). Building the *current* week here instead would
+    # leave the endpoint querying a week the seed never populated.
+    today = datetime.now(UTC).date()
+    period_end = default_week_ending(today)
+    period_start = period_end - timedelta(days=6)
     print(f"[seed] week window: {period_start} -> {period_end}", flush=True)  # noqa: T201
 
     # Local demo: attach the demo data to the operator's real Clerk org (set

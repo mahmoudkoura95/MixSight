@@ -19,7 +19,7 @@ from typing import Any
 
 import jwt
 from jwt import PyJWKClient
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from mixsight.config import get_settings
 
@@ -34,8 +34,22 @@ class ClerkTokenPayload(BaseModel):
     exp: int
     iat: int
     org_id: str | None = None
-    org_role: str | None = None  # "org:admin" / "org:account_manager"
+    org_role: str | None = None  # "admin" / "account_manager" (or "org:"-prefixed)
     org_permissions: list[str] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _hoist_compact_org_claim(cls, data: object) -> object:
+        """Clerk's modern session token packs the active org into a compact
+        `o` claim (`{id, rol, slg}`) rather than the legacy flat
+        `org_id` / `org_role`. Lift it so downstream tenancy code keeps
+        reading `org_id` / `org_role`. Legacy flat claims still win if present.
+        """
+        if isinstance(data, dict) and not data.get("org_id"):
+            org = data.get("o")
+            if isinstance(org, dict):
+                return {**data, "org_id": org.get("id"), "org_role": org.get("rol")}
+        return data
 
 
 class InvalidClerkTokenError(Exception):

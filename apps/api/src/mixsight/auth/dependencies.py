@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
@@ -74,7 +75,27 @@ async def _jit_provision_user(db: AsyncSession, payload: ClerkTokenPayload) -> U
         role=map_clerk_role(payload.org_role),
     )
     db.add(user)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        # A concurrent request won the insert race — the pacing page fires its
+        # /pacing and /reallocation-suggestions fetches in parallel, so two
+        # requests can JIT-provision the same clerk_user_id at once. Postgres
+        # blocks the loser's INSERT until the winner commits, so after we roll
+        # back our aborted transaction the winner's row is readable.
+        await db.rollback()
+        existing = (
+            await db.execute(
+                select(User).where(
+                    col(User.clerk_user_id) == payload.sub,
+                    col(User.deleted_at).is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            raise
+        log.info("auth.jit_user_race_resolved", clerk_user_id=payload.sub)
+        return existing
     log.info(
         "auth.jit_user_provisioned",
         clerk_user_id=payload.sub,

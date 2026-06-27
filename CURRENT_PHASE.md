@@ -100,7 +100,20 @@ User-initiated full review + refactor of the Weeks 1-3 surface. Repo put under g
 
 **Quality bar green:** ruff (lint+format), mypy strict (62 files), pytest **55 passed** (51 + 4 new), web typecheck + lint.
 
-**Not addressed (still open carry-overs):** webhook concurrent-insert race, tenancy-audit silent degrade, the "JWT carries no org_id" 401 test, CSV per-row→bulk upsert (by design for Phase 1a), `EmptyState` extraction.
+**Not addressed (still open carry-overs):** webhook concurrent-insert race, tenancy-audit silent degrade, CSV per-row→bulk upsert (by design for Phase 1a), `EmptyState` extraction.
+
+### Live demo wiring + first real browser run (2026-06-27 → 06-28)
+
+Wired the local demo harness against a real Clerk org and drove the full happy path in the browser (the `/week-end` demoability check, for real). It surfaced **four genuine bugs** the demo path had been hiding — none caught earlier because no signed-in user had ever reached these surfaces:
+
+- **Auth — modern Clerk org claim ignored (the big one).** Clerk's session token packs the active org into a compact `o` claim (`{id, rol, slg}`); the backend `ClerkTokenPayload` only read the legacy flat `org_id`/`org_role`, so every signed-in request lost org context → pacing 404'd "Client or market not found." Fixed with a `model_validator` that hoists `o` → `org_id`/`org_role`, plus `map_clerk_role` now strips the optional `org:` prefix (`o.rol` is `admin`, webhooks send `org:admin`). Tests: `test_clerk_token_payload.py`.
+- **Auth — sign-in dead-ends on the org task.** The instance forces org membership, so post-auth Clerk routes to `/sign-in/tasks`; the custom Elements sign-in had no step for it → blank "Welcome back." This also explained "can't sign out" (home unreachable) and "sign-in does nothing." Fixed by rendering Clerk's prebuilt `<TaskChooseOrganization>` at the `/tasks` path inside the catch-all sign-in route. (`taskUrls` on ClerkProvider does **not** redirect the middleware, so the in-route handler is what works.)
+- **Home page 500 — `<SignOutButton>` "multiple children."** Passing a child element to Clerk's client `SignOutButton` from an async **server** component trips `React.Children.only` across the RSC boundary. Latent since Week 1 (nobody reached home). Fixed by extracting `SignOutControl` as a client component. This is why "Sign out" appeared missing — the page was 500ing.
+- **JIT concurrent insert race.** The pacing page fetches `/pacing` + `/reallocation-suggestions` in parallel; both JIT-provision the same `clerk_user_id` → loser hits `users_clerk_user_id_unique` → 500. Fixed: `_jit_provision_user` catches `IntegrityError`, rolls back, re-queries the winner's row. (Unit test infeasible under the SAVEPOINT fixture — verified via the browser happy path; see note in `test_jit_and_clock_skew.py`.)
+
+Also fixed a **seed/endpoint week mismatch**: the seed built the *current* week while the endpoint snapshots the *last completed* week (UTC) — so even after auth, the demo would show `no_active_plan`. Seed now uses `default_week_ending(datetime.now(UTC).date())`. `test_pacing_endpoint.py` aligned to UTC (it was flaking at the local/UTC date boundary).
+
+**Verified end-to-end in the browser:** sign-in → org task → home → pacing table (6 NB UK campaigns, drift, status badges) → reallocation options (positive deltas, `GBP`-prefixed amounts) → sign-out → back to sign-in. Quality bar: ruff, mypy (62 files), pytest **59 passed**, web typecheck + lint + build.
 
 ### Week 3 active decisions (locked 2026-06-26)
 

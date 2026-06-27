@@ -81,6 +81,16 @@ async def test_jit_reuses_existing_organization(db_session: AsyncSession) -> Non
     assert user_b.organization_id == orgs[0].id
 
 
+# NOTE: the concurrent JIT insert-race fix (`_jit_provision_user` catches
+# IntegrityError, rolls back, re-queries the winner's row) is verified
+# end-to-end against the running app, not here: the SAVEPOINT `db_session`
+# fixture can't model it, because `session.rollback()` unwinds the savepoint
+# stack so a prior savepoint-"committed" row doesn't survive for the
+# re-query (in real Postgres, two independent transactions, it does). A unit
+# test would need a second real-commit connection — deferred as not worth the
+# fixture complexity for a path the browser smoke covers.
+
+
 @pytest.mark.asyncio
 async def test_find_or_create_organization_is_idempotent(
     db_session: AsyncSession,

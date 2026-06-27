@@ -2,7 +2,9 @@
 
 import * as Clerk from "@clerk/elements/common";
 import * as SignIn from "@clerk/elements/sign-in";
+import { TaskChooseOrganization } from "@clerk/nextjs";
 import Image from "next/image";
+import { usePathname } from "next/navigation";
 
 const cardClass =
   "bg-white/[0.04] border border-white/10 rounded-2xl p-6 backdrop-blur";
@@ -14,6 +16,30 @@ const submitClass =
 const errorClass = "mt-1 text-xs text-rose-300";
 
 export default function SignInPage() {
+  const pathname = usePathname();
+  // The Clerk instance forces organization membership, so after password
+  // verification the session carries a `choose-organization` task and the
+  // middleware redirects pending sessions to /sign-in/tasks. Render Clerk's
+  // prebuilt org-selection UI there — the Elements flow below has no step for
+  // it, which is what previously dead-ended sign-in. See §7.19 / ADR-004.
+  if (pathname?.endsWith("/tasks")) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-[#0f1e3d] text-white px-4 py-12">
+        <div className="w-full max-w-md">
+          <div className="flex flex-col items-center mb-8">
+            <div className="bg-white rounded-2xl p-3 mb-6 shadow-2xl">
+              <Image src="/logo.png" alt="MixSight" width={140} height={36} priority />
+            </div>
+            <h1 className="text-2xl font-semibold text-center leading-snug">
+              Choose your workspace
+            </h1>
+          </div>
+          <TaskChooseOrganization redirectUrlComplete="/" />
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen flex items-center justify-center bg-[#0f1e3d] text-white px-4 py-12">
       <div className="w-full max-w-md">

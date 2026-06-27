@@ -3,7 +3,7 @@ and /reallocation-suggestions, including the §7.19 cross-tenant case."""
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import httpx
@@ -30,7 +30,10 @@ async def _seed_for_user(db: AsyncSession, user: User) -> tuple[Client, Market]:
     await db.commit()
     await db.refresh(market)
 
-    week_ending = default_week_ending(date.today())
+    # UTC to match the endpoint (which uses datetime.now(UTC).date()); local
+    # date.today() can sit a day — and across the Sunday boundary, a whole
+    # week — off the endpoint's week_ending.
+    week_ending = default_week_ending(datetime.now(UTC).date())
     period_start = week_ending - timedelta(days=6)
     plan = Plan(
         organization_id=user.organization_id,

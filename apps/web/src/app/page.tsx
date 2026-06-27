@@ -1,5 +1,6 @@
 import { currentUser } from "@clerk/nextjs/server";
-import { SignOutButton } from "@clerk/nextjs";
+
+import { SignOutControl } from "@/components/sign-out-control";
 
 export default async function HomePage() {
   const user = await currentUser();
@@ -32,14 +33,7 @@ export default async function HomePage() {
           </p>
         )}
 
-        <SignOutButton>
-          <button
-            type="button"
-            className="w-full rounded-lg border border-white/15 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/30 hover:bg-white/5"
-          >
-            Sign out
-          </button>
-        </SignOutButton>
+        <SignOutControl />
       </div>
     </main>
   );
