@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
     API_URL: str = "http://localhost:8000"
 
+    # Local demo only: when set, the seed script attaches the NB EMEA demo
+    # data to the Organization with this Clerk org id instead of a synthetic
+    # one, so a real signed-in user can see it. Leave unset in CI/tests.
+    SEED_CLERK_ORG_ID: str | None = None
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

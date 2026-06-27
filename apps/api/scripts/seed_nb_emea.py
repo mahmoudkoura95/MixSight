@@ -30,6 +30,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
+from mixsight.config import get_settings
 from mixsight.db import engine
 from mixsight.models import (
     Actuals,
@@ -125,15 +126,15 @@ def _current_week_window(today: date) -> tuple[date, date]:
     return monday, monday + timedelta(days=6)
 
 
-async def _upsert_organization(db: AsyncSession) -> Organization:
+async def _upsert_organization(db: AsyncSession, clerk_org_id: str) -> Organization:
     existing = (
         await db.execute(
-            select(Organization).where(col(Organization.clerk_organization_id) == _ORG_CLERK_ID)
+            select(Organization).where(col(Organization.clerk_organization_id) == clerk_org_id)
         )
     ).scalar_one_or_none()
     if existing is not None:
         return existing
-    org = Organization(name="Brave Bison Agency", clerk_organization_id=_ORG_CLERK_ID)
+    org = Organization(name="Brave Bison Agency", clerk_organization_id=clerk_org_id)
     db.add(org)
     await db.flush()
     return org
@@ -334,8 +335,21 @@ async def seed(*, dry_run: bool = False) -> None:
     period_start, period_end = _current_week_window(today)
     print(f"[seed] week window: {period_start} -> {period_end}", flush=True)  # noqa: T201
 
+    # Local demo: attach the demo data to the operator's real Clerk org (set
+    # SEED_CLERK_ORG_ID) so a signed-in user passes the §7.19 tenancy check
+    # and can actually load the pacing surface. Falls back to a synthetic id
+    # (used by nobody's real login) for pure data-shape seeding.
+    clerk_org_id = get_settings().SEED_CLERK_ORG_ID or _ORG_CLERK_ID
+    if clerk_org_id == _ORG_CLERK_ID:
+        print(  # noqa: T201
+            "[seed] WARNING: SEED_CLERK_ORG_ID unset — data attaches to a "
+            "synthetic org no real login owns; the pacing page will 404 for "
+            "you. Set SEED_CLERK_ORG_ID to your Clerk org id to demo it.",
+            flush=True,
+        )
+
     async with AsyncSession(engine, expire_on_commit=False) as db:
-        org = await _upsert_organization(db)
+        org = await _upsert_organization(db, clerk_org_id)
         client = await _upsert_client(db, org)
         market = await _upsert_market(db, org, client)
         plan = await _upsert_plan(db, org, client, period_start, period_end)
@@ -350,9 +364,16 @@ async def seed(*, dry_run: bool = False) -> None:
             return
         await db.commit()
 
+    pacing_path = f"/clients/{client.id}/markets/{market.id}/pacing"
     print(  # noqa: T201
         f"[seed] done. org={org.id} client={client.id} market={market.id} "
         f"plan={plan.id} plan_lines={len(plan_lines)} new_actuals={inserted_actuals}",
+        flush=True,
+    )
+    print(  # noqa: T201
+        f"[seed] demo pacing path: {pacing_path}\n"
+        f"[seed]   → set NEXT_PUBLIC_DEMO_PACING_PATH={pacing_path} in .env to "
+        f"link it from the home page.",
         flush=True,
     )
 

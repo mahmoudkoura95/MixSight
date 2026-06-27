@@ -24,9 +24,16 @@ Run at the end of every Phase 1a/1b/1c week and at every sub-phase boundary. **D
 Bring the stack up locally and exercise the surfaces shipped this week.
 
 - `make up` (or `pnpm db:up`) — postgres + redis healthy.
-- `make api` — FastAPI on :8000. Confirm startup logs show `startup.tenancy_audit_passed`. `curl http://localhost:8000/healthz` returns `{"status":"ok",...}`.
+- `make api` — FastAPI on :8000. Confirm startup logs show `startup.invariants_ok`. `curl http://localhost:8000/healthz` returns `{"status":"ok",...}`.
 - `make web` — Next.js on :3000. Visit `/` while signed out → redirects to `/sign-in`. The sign-in page renders with the navy/teal brand. No console errors.
 - Run through every NEW user-facing surface that shipped this week. UI work without a real browser pass is not "complete."
+
+### Demoability check (signed-in happy path)
+
+A surface that boots but that no signed-in user can reach with data is not actually demoable. Prove the happy path end-to-end, not just that the server starts:
+
+- With the local demo harness configured (`SEED_CLERK_ORG_ID` = your Clerk org id, then `uv run python scripts/seed_nb_emea.py`, then `NEXT_PUBLIC_DEMO_PACING_PATH` = the path the seed prints), sign in and follow the home-page link.
+- Confirm the pacing surface renders **with seeded data** — table rows, drift, status badges, reallocation options — not a 404 or an empty state. A 404 here means the signed-in org doesn't own the seed data (tenancy/seed-org misalignment).
 
 If you cannot test a surface in a browser (no display, headless env, etc.), say so explicitly — never claim success on a UI surface without a browser pass.
 

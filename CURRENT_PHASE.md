@@ -210,6 +210,7 @@ User-initiated full review + refactor of the Weeks 1-3 surface. Repo put under g
 - [ ] **Week 4:** Empty-state handling per §7.18 — including CSV-specific: never-uploaded, partial-week-uploaded, parse-failed, schema-mismatch
 - [ ] **Week 4:** Monday-morning CSV upload reminder email (system-prompted; trigger is human)
 - [ ] **Week 4:** Phase 1a internal-acceptance demo against synthetic NB EMEA fixtures
+  - **Demoability prerequisite (partly done 2026-06-27).** The Week 3 pacing surface boots but no signed-in user could reach seeded data: the seed hardcoded a synthetic `clerk_organization_id` that never matches a real Clerk login, so `enforce_client_access` 404s. Local demo harness added — seed now reads `SEED_CLERK_ORG_ID` (attach demo data to the operator's real Clerk org) and prints the pacing path; home page links to it via `NEXT_PUBLIC_DEMO_PACING_PATH`; `/week-end` Step 2 now has a signed-in happy-path check. **Still open for Week 4 demo:** run the harness end-to-end in a browser and confirm lines render. The *product* fix (self-serve onboarding + client/market creation) is correctly gated to **Phase 1b Week 1** when Brave Bison gets hands-on access (ADR-004) — not built now.
 - [x] Design partner committed (Brave Bison Agency, pilot: New Balance EMEA) — 2026-06-21
 
 ## Phase 1a → 1b handoff (not end-of-1a)
