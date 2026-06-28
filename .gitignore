@@ -50,6 +50,8 @@ logs/
 
 # Claude Code local-only artifacts (per-user settings shouldn't be checked in)
 .claude/settings.local.json
+# week-end mechanical-gate sentinel (per-machine pass record; not shared state)
+.claude/.week-end-pass
 
 # Generated artifacts
 apps/web/src/types/api.ts

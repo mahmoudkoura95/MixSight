@@ -49,8 +49,9 @@ Read `CURRENT_PHASE.md` at the start of every session. Constrain proposals to th
 2. **Use plan mode for anything cross-cutting.** Data model, tenancy, audit log, LLM calls, connector lifecycle. Self-contained UI work doesn't need it.
 3. **Reach for skills before improvising.** See `.claude/skills/`. The skill is where the pattern lives; the cited scope section is the authoritative source.
 4. **Run the slash commands as rituals.** `/phase-start`, `/scope-check`, `/out-of-scope-gate`, `/tenancy-audit`, `/llm-degraded-audit` — these are not optional polish.
-5. **Close every week with `/week-end` — mandatory.** No week is "complete" without it. Full quality bar + boot + behavioral smoke + `/code-review` + ledger updates. Details in `.claude/commands/week-end.md`. Applies to every Phase 1a/1b/1c week and every sub-phase boundary.
-6. **Update the ledgers.** `DECISIONS.md` for ADRs; `SHIPPED.md` for actuals-vs-spec at end of each sub-phase.
+5. **Close every week with `/week-end` — mandatory.** A week is **not "complete"** until every gate in its Definition of Done passes: mechanical quality bar, behavioral + demoability smoke, `/code-review` (findings triaged — **never deferred wholesale**), a `/simplify` refactor pass, a per-feature test gate (every new feature names its contract test), and ledger updates. Flipping `WEEK: N (complete)` in `CURRENT_PHASE.md` is **blocked by a hook** (`.claude/hooks/week-end-gate.mjs`) until the bar passes (`.claude/.week-end-pass` sentinel from `scripts/week_end_gate.sh`) and `SHIPPED.md` records the review. Don't route around the hook — satisfy the gate. Week 3's deferred review is the cautionary tale. Details in `.claude/commands/week-end.md`. Applies to every Phase 1a/1b/1c week and every sub-phase boundary.
+6. **No feature ships untested; no week ships un-refactored.** Every new endpoint / mutation / surface / algorithm gets the test that proves its contract (the §7.19 tenancy harness already fails the suite without the cross-tenant case). Every week's diff gets the `/simplify` pass so the codebase doesn't rot one "clean it up later" at a time.
+7. **Update the ledgers.** `DECISIONS.md` for ADRs; `SHIPPED.md` for actuals-vs-spec at end of each sub-phase.
 
 ---
 
