@@ -19,22 +19,22 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/tenancy-check.sh",
+            "command": "node .claude/hooks/tenancy-check.mjs",
             "description": "Flag new FastAPI routes that take client_id without enforce_client_access"
           },
           {
             "type": "command",
-            "command": ".claude/hooks/migration-check.sh",
+            "command": "node .claude/hooks/migration-check.mjs",
             "description": "Verify any new Alembic migration follows §6.2 conventions"
           },
           {
             "type": "command",
-            "command": ".claude/hooks/llm-fallback-check.sh",
+            "command": "node .claude/hooks/llm-fallback-check.mjs",
             "description": "Flag any new messages.create call without an explicit surface-specific fallback"
           },
           {
             "type": "command",
-            "command": ".claude/hooks/audit-log-check.sh",
+            "command": "node .claude/hooks/audit-log-check.mjs",
             "description": "Flag patterns that may bypass the SQLAlchemy audit log hook"
           }
         ]
